@@ -1,0 +1,490 @@
+
+#include "demo_scene.h"
+#include <math.h>
+#include <stdlib.h>
+
+#define PI 3.14159265358979323846
+
+#include <stdlib.h>
+#include <time.h>
+
+#define MAX_LASERS 5
+#define LASER_LIFETIME 100
+#define LASER_COLOR 0xFF0000  // Red color for lasers
+
+typedef struct {
+    Vector3 start;
+    Vector3 end;
+    int lifetime;
+} Laser;
+
+static Laser lasers[MAX_LASERS];
+static int num_lasers = 0;
+
+static Mesh sphere;
+static Mesh spaceship1;
+static Mesh spaceship2;
+static Mesh spaceship3;  // Add this line at the top of the file with other static Mesh declarations
+static float time = 0.0f;
+static float sphere_rotation = 0.0f;
+
+void draw_laser(Vector3 start, Vector3 end, float zoom_factor) {
+    Vector3 direction = {end.x - start.x, end.y - start.y, end.z - start.z};
+    float length = sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+    
+    for (float t = 0; t <= 1; t += 0.01) {
+        Vector3 point = {
+            start.x + direction.x * t,
+            start.y + direction.y * t,
+            start.z + direction.z * t
+        };
+        
+        // Project the point
+        float z_offset = 5.0f;
+        int x = (int)((point.x / (point.z + z_offset)) * screen_width + screen_width / 2);
+        int y = (int)((-point.y / (point.z + z_offset)) * screen_height + screen_height / 2);
+        
+        put_pixel_callback(x, y, LASER_COLOR);
+    }
+}
+
+
+static void create_spaceship(Mesh *mesh) {
+    mesh->num_vertices = 5;
+    mesh->num_faces = 6;
+    mesh->vertices = malloc(sizeof(Vector3) * mesh->num_vertices);
+    mesh->faces = malloc(sizeof(Face) * mesh->num_faces);
+
+    mesh->vertices[0] = (Vector3){0, 0.5f, 0};
+    mesh->vertices[1] = (Vector3){-0.5f, -0.5f, 0.5f};
+    mesh->vertices[2] = (Vector3){0.5f, -0.5f, 0.5f};
+    mesh->vertices[3] = (Vector3){-0.5f, -0.5f, -0.5f};
+    mesh->vertices[4] = (Vector3){0.5f, -0.5f, -0.5f};
+
+    mesh->faces[0] = (Face){0, 1, 2};
+    mesh->faces[1] = (Face){0, 3, 1};
+    mesh->faces[2] = (Face){0, 2, 4};
+    mesh->faces[3] = (Face){0, 4, 3};
+    mesh->faces[4] = (Face){1, 3, 4};
+    mesh->faces[5] = (Face){1, 4, 2};
+}
+
+static void create_sphere(Mesh *mesh, int subdivisions) {
+    int num_vertices = (subdivisions + 1) * (subdivisions + 1);
+    int num_faces = subdivisions * subdivisions * 2;
+
+    mesh->num_vertices = num_vertices;
+    mesh->num_faces = num_faces;
+    mesh->vertices = malloc(sizeof(Vector3) * num_vertices);
+    mesh->faces = malloc(sizeof(Face) * num_faces);
+
+    int index = 0;
+    for (int lat = 0; lat <= subdivisions; lat++) {
+        float theta = lat * PI / subdivisions;
+        float sin_theta = sinf(theta);
+        float cos_theta = cosf(theta);
+
+        for (int lon = 0; lon <= subdivisions; lon++) {
+            float phi = lon * 2 * PI / subdivisions;
+            float sin_phi = sinf(phi);
+            float cos_phi = cosf(phi);
+
+            float x = sin_theta * cos_phi;
+            float y = cos_theta;
+            float z = sin_theta * sin_phi;
+
+            mesh->vertices[index++] = (Vector3){x, y, z};
+        }
+    }
+
+    index = 0;
+    for (int lat = 0; lat < subdivisions; lat++) {
+        for (int lon = 0; lon < subdivisions; lon++) {
+            int current = lat * (subdivisions + 1) + lon;
+            int next = current + subdivisions + 1;
+
+            mesh->faces[index++] = (Face){current, next, current + 1};
+            mesh->faces[index++] = (Face){current + 1, next, next + 1};
+        }
+    }
+}
+
+void init_demo_scene(void) {
+    create_sphere(&sphere, 16);
+    create_spaceship(&spaceship1);
+    create_spaceship(&spaceship2);
+    create_spaceship(&spaceship3);  // Create the third spaceship
+
+    center_mesh(&sphere);
+    center_mesh(&spaceship1);
+    center_mesh(&spaceship2);
+    center_mesh(&spaceship3);
+
+    // Scale down the spaceships
+    scale_mesh(&spaceship1, 0.2f);
+    scale_mesh(&spaceship2, 0.2f);
+    scale_mesh(&spaceship3, 0.2f);
+
+    srand(time(NULL));  
+}
+
+/*
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    (void)rotation_y;  // This line silences the unused parameter warning
+
+    sphere_rotation += 0.01f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.01f;
+    float orbit_radius = 8.0f;  // Using the orbit radius that worked for the polar orbit
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+    
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    render_mesh(&temp_ship1, rotation_x, time, rotation_z, zoom_factor * 0.3f, 0);
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    render_mesh(&temp_ship2, rotation_x + PI/2, 0, time, zoom_factor * 0.3f, 0);
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+}
+*/
+/*
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    sphere_rotation += 0.01f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.01f;
+    float orbit_radius = 8.0f;  // Increased orbit radius for more noticeable orbits
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+    
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    render_mesh(&temp_ship1, 0, time, 0, zoom_factor * 0.3f, 0);
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    //render_mesh(&temp_ship2, time, PI/2, 0, zoom_factor * 0.3f, 0);
+    render_mesh(&temp_ship2, 0, PI, 0, zoom_factor * 0.3f, 0);
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+}
+
+*/
+
+/*
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    sphere_rotation += 0.004f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.001f;
+    float orbit_radius = 8.5f;  // Increased orbit radius for more noticeable orbits
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+    
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    //render_mesh(&temp_ship1, 0, time, 0, zoom_factor * 0.3f, 0);
+    render_mesh(&temp_ship1, 0, 0, PI/2, zoom_factor * 0.3f, 0);
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    render_mesh(&temp_ship2, time, PI/2, 0, zoom_factor * 0.3f, 0);
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+}
+
+*/
+
+/*
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    (void)rotation_y;  // Silence unused parameter warning
+
+    sphere_rotation += 0.004f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.001f;
+    float orbit_radius = 8.5f;
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    render_mesh(&temp_ship1, 0, -time, PI/2, zoom_factor * 0.3f, 0);
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    render_mesh(&temp_ship2, time, PI/2, 0, zoom_factor * 0.3f, 0);
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+}
+*/
+/*
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    (void)rotation_y;  // Silence unused parameter warning
+
+    sphere_rotation += 0.004f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.001f;
+    float orbit_radius = 8.5f;
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Center orbit (spaceship3)
+    float x3 = cosf(time * 1.5f) * orbit_radius;  // Faster orbit
+    float y3 = sinf(time * 1.5f) * orbit_radius;
+    float z3 = 0;  // Keep it in the x-y plane
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    render_mesh(&temp_ship1, 0, -time, PI/2, zoom_factor * 0.3f, 0);
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    render_mesh(&temp_ship2, time, PI/2, 0, zoom_factor * 0.3f, 0);
+
+    // Render spaceship3 (center orbit)
+    Mesh temp_ship3 = copy_mesh(&spaceship1);  // Using spaceship1 model for the third ship
+    translate_mesh(&temp_ship3, x3, y3, z3);
+    render_mesh(&temp_ship3, PI/2, time * 1.5f, 0, zoom_factor * 0.3f, 0);
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+    free_mesh(&temp_ship3);
+}
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    (void)rotation_y;  // Silence unused parameter warning
+
+    sphere_rotation += 0.004f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.001f;
+    float orbit_radius = 8.5f;
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Center orbit (spaceship3) - corrected
+    float x3 = cosf(time * 0.7f) * orbit_radius;  // Slower orbit
+    float y3 = sinf(time * 0.7f) * orbit_radius;
+    float z3 = sinf(time * 0.5f) * orbit_radius * 0.5f;  // Add some z-axis movement
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    //render_mesh(&temp_ship1, 0, -time, PI/2, zoom_factor * 0.3f, 0);
+    render_mesh(&temp_ship3, PI/6, angle, 0, zoom_factor * 0.3f, 0);
+
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    render_mesh(&temp_ship2, time, PI/2, 0, zoom_factor * 0.3f, 0);
+
+    // Render spaceship3 (center orbit) - corrected
+    Mesh temp_ship3 = copy_mesh(&spaceship3);
+    translate_mesh(&temp_ship3, x3, y3, z3);
+    render_mesh(&temp_ship3, time * 0.7f, time * 0.5f, PI/4, zoom_factor * 0.3f, 0);
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+    free_mesh(&temp_ship3);
+}
+*/
+/*
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    (void)rotation_y;  // Silence unused parameter warning
+
+    sphere_rotation += 0.004f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.001f;
+    float orbit_radius = 8.5f;
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Tilted orbit (spaceship3)
+    float angle = time * 0.8f;  // Slightly slower than the others
+    float x3 = cosf(angle) * orbit_radius;
+    float y3 = sinf(angle) * orbit_radius * 0.5f;  // Compress the y-axis for a tilted orbit
+    float z3 = sinf(angle) * orbit_radius * 0.866f;  // sqrt(3)/2, to maintain circular orbit when viewed from above
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    render_mesh(&temp_ship1, 0, -time, PI/2, zoom_factor * 0.3f, 0);
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    render_mesh(&temp_ship2, time, PI/2, 0, zoom_factor * 0.3f, 0);
+
+    // Render spaceship3 (tilted orbit)
+    Mesh temp_ship3 = copy_mesh(&spaceship3);
+    translate_mesh(&temp_ship3, x3, y3, z3);
+    render_mesh(&temp_ship3, PI/6, angle, 0, zoom_factor * 0.3f, 0);
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+    free_mesh(&temp_ship3);
+}
+*/
+
+void render_demo_scene(float rotation_x, float rotation_y, float rotation_z, float zoom_factor) {
+    (void)rotation_y;  // Silence unused parameter warning
+
+    sphere_rotation += 0.004f;
+
+    // Render the rotating sphere
+    render_mesh(&sphere, rotation_x, sphere_rotation, rotation_z, zoom_factor * 2.0f, 0);
+
+    time += 0.001f;
+    float orbit_radius = 8.5f;
+
+    // Equatorial orbit (spaceship1)
+    float x1 = cosf(time) * orbit_radius;
+    float y1 = 0;  // Keep it in the x-z plane
+    float z1 = sinf(time) * orbit_radius;
+
+    // Polar orbit (spaceship2)
+    float x2 = 0;  // Keep it in the y-z plane
+    float y2 = cosf(time) * orbit_radius;
+    float z2 = sinf(time) * orbit_radius;
+
+    // Stationary position (spaceship3)
+    float x3 = orbit_radius * 0.5f;
+    float y3 = orbit_radius * 0.5f;
+    float z3 = orbit_radius * 0.5f;
+
+    // Render spaceship1 (equatorial orbit)
+    Mesh temp_ship1 = copy_mesh(&spaceship1);
+    translate_mesh(&temp_ship1, x1, y1, z1);
+    render_mesh(&temp_ship1, 0, -time, PI/2, zoom_factor * 0.3f, 0);
+
+    // Render spaceship2 (polar orbit)
+    Mesh temp_ship2 = copy_mesh(&spaceship2);
+    translate_mesh(&temp_ship2, x2, y2, z2);
+    render_mesh(&temp_ship2, time, PI/2, 0, zoom_factor * 0.3f, 0);
+
+    // Render spaceship3 (stationary)
+    Mesh temp_ship3 = copy_mesh(&spaceship3);
+    translate_mesh(&temp_ship3, x3, y3, z3);
+    render_mesh(&temp_ship3, 0, time * 0.5f, 0, zoom_factor * 0.3f, 0);
+
+    // Randomly shoot lasers
+    if (rand() % 100 < 2 && num_lasers < MAX_LASERS) {  // 2% chance each frame
+        Vector3 start = {x3, y3, z3};
+        Vector3 end = (rand() % 2 == 0) ? 
+            (Vector3){x1, y1, z1} : (Vector3){x2, y2, z2};
+        lasers[num_lasers++] = (Laser){start, end, LASER_LIFETIME};
+    }
+
+    // Update and draw lasers
+    for (int i = 0; i < num_lasers; i++) {
+        if (lasers[i].lifetime > 0) {
+            draw_laser(lasers[i].start, lasers[i].end, zoom_factor);
+            lasers[i].lifetime--;
+        } else {
+            lasers[i] = lasers[--num_lasers];
+            i--;
+        }
+    }
+
+    free_mesh(&temp_ship1);
+    free_mesh(&temp_ship2);
+    free_mesh(&temp_ship3);
+}
+
+void cleanup_demo_scene(void) {
+    free_mesh(&sphere);
+    free_mesh(&spaceship1);
+    free_mesh(&spaceship2);
+    free_mesh(&spaceship3);  // Free the third spaceship
+}
